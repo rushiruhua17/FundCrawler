@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <title>基金数据可视化平台</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5"></script>
+  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+  <style>
+    body {
+      background: #f2f2f2;
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      margin: 0;
+      position: relative;
+    }
+    .card-container {
+      display: flex;
+      justify-content: space-around;
+      width: 1000px;
+      margin: 0 auto 30px auto;
+    }
+    .card {
+      background: #fff;
+      width: 45%;
+      padding: 20px;
+      font-size: 22px;
+      font-weight: bold;
+      text-align: center;
+      box-shadow: 0 0 5px rgba(0, 0, 0, 0.1);
+    }
+    .chart-container {
+      width: 1000px;
+      height: 480px;
+      margin: 30px auto;
+      background: #fff;
+      padding: 20px;
+      box-shadow: 0 0 8px rgba(0, 0, 0, 0.1);
+    }
+    .ai-chat-container {
+      position: fixed;
+      right: 20px;
+      top: 20px;
+      width: 320px;
+      height: calc(100% - 40px);
+      background: #fff;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 0 8px rgba(0, 0, 0, 0.1);
+      display: flex;
+      flex-direction: column;
+      box-sizing: border-box;
+    }
+    .ai-title {
+      font-size: 18px;
+      font-weight: bold;
+      padding-bottom: 10px;
+      border-bottom: 1px solid #eee;
+      margin-bottom: 15px;
+    }
+    .ai-messages {
+      flex: 1;
+      overflow-y: auto;
+      margin-bottom: 15px;
+      padding: 0 10px;
+    }
+    .ai-message {
+      padding: 10px 15px;
+      margin-bottom: 10px;
+      border-radius: 12px;
+      max-width: 90%;
+    }
+    .ai-message.user {
+      background: #e6f7ff;
+      align-self: flex-end;
+    }
+    .ai-message.ai {
+      background: #f5f5f5;
+      align-self: flex-start;
+    }
+    .ai-message.loading {
+      background: #f9f9f9;
+      align-self: center;
+      text-align: center;
+      padding: 8px 0;
+    }
+    .ai-input-container {
+      display: flex;
+      gap: 10px;
+    }
+    .ai-input {
+      flex: 1;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      resize: none;
+      height: 40px;
+    }
+    .ai-button {
+      background: #5470c6;
+      color: white;
+      border: none;
+      padding: 0 20px;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="card-container">
+    <div class="card" id="total-funds">基金总数：加载中...</div>
+    <div class="card" id="total-assets">总资产规模：加载中...</div>
+  </div>
+  <div class="card-container">
+    <div class="card" id="manager-count">基金管理人总数：加载中...</div>
+    <div class="card" id="total-managers">基金经理总人数：加载中...</div>
+  </div>
+  <!-- 图表1：各类型基金总数 -->
+  <div id="chart1" class="chart-container"></div>
+  <!-- 图表2：资产规模等级分布（饼图） -->
+  <div id="chart2" class="chart-container"></div>
+  <!-- 图表5：不同基金类型的总资产规模 -->
+  <div id="chart5" class="chart-container"></div>
+  <!-- 图表3：基金经理管理总资产 Top6 -->
+  <div id="chart3" class="chart-container"></div>
+  <!-- 图表4：基金类型年回报率对比图 -->
+  <div id="chart4" class="chart-container"></div>
+  <!-- 图表6：基金类型夏普比率趋势对比图 -->
+  <div id="chart6" class="chart-container"></div>
+
+  <div class="ai-chat-container">
+    <div class="ai-title">AI基金分析助手</div>
+    <div class="ai-messages" id="ai-messages">
+      <div class="ai-message ai">您好！我是基金分析助手，您可以问我关于当前页面基金数据的问题，
+        例如：<br>1. 哪种基金类型规模最大？<br>2. 高回报基金有什么特征？</div>
+    </div>
+    <div class="ai-input-container">
+      <textarea class="ai-input" id="ai-input" placeholder="输入问题..."></textarea>
+      <button class="ai-button" id="ai-send">发送</button>
+    </div>
+  </div>
+
+  <script>
+    const DEEPSEEK_API_KEY = 'sk-f3c0af4a49d74b6bb15a40d85d1f44f7';
+    const DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
+
+    let pageData = {
+      totalFunds: '未知',
+      totalAssets: '未知',
+      managerCount: '未知',
+      totalManagers: '未知',
+      fundTypes: [],
+      fundTypeAssets: [],
+      sharpeRatios: []             //     ✅ 新增字段，存储夏普比率数据
+    };
+// let pageData = {
+//   // 基础统计指标（卡片展示数据）
+//   totalFunds: '未知',       // 基金总数
+//   totalAssets: '未知',      // 总资产规模
+//   managerCount: '未知',     // 基金管理人总数
+//   totalManagers: '未知',    // 基金经理总人数
+//
+//   // 图表数据源（ECharts渲染使用）
+//   fundTypes: [],            // 各类型基金数量数据（图表1）
+//   fundTypeAssets: [],       // 各类型基金资产规模数据（图表5）
+//   sharpeRatios: []          // 各类型基金夏普比率数据（图表6）
+// };
+    fetch('/api/data/总资产规模（亿元）')
+      .then(res => res.json())
+      .then(data => {
+        const value = parseFloat(data[0]["总资产规模（亿元）"]).toFixed(2);
+        document.getElementById('total-assets').innerText = `总资产规模：${value} 亿元`;
+        pageData.totalAssets = value;
+      });
+
+    fetch('/api/data/基金管理人总数')
+      .then(res => res.json())
+      .then(data => {
+        document.getElementById('manager-count').innerText = '基金管理人总数：' + data[0]["基金管理人去重总数"];
+        pageData.managerCount = data[0]["基金管理人去重总数"];
+      });
+
+    fetch('/api/data/各类型基金总数')
+      .then(res => res.json())
+      .then(data => {
+        const xData = data.map(d => d["基金类型"]);
+        const yData = data.map(d => d["基金总数(个)"]);
+        echarts.init(document.getElementById('chart1')).setOption({
+          title: { text: '各类型基金总数', left: 'center' },
+          tooltip: { trigger: 'axis' },
+          xAxis: { type: 'category', data: xData, axisLabel: { rotate: 30 } },
+          yAxis: { type: 'value', name: '数量（个）' },
+          series: [{ data: yData, type: 'bar', itemStyle: { color: '#5470c6' } }]
+        });
+        pageData.fundTypes = data;
+      });
+
+    fetch('/api/data/资产规模等级分布图')
+      .then(res => res.json())
+      .then(data => {
+        const pieData = data.map(d => ({ name: d["资产规模等级"], value: d["基金总数(个)"] }));
+        echarts.init(document.getElementById('chart2')).setOption({
+          title: { text: '资产规模等级分布', left: 'center' },
+          tooltip: { trigger: 'item' },
+          legend: { bottom: 10 },
+          series: [{ type: 'pie', radius: '60%', data: pieData }]
+        });
+      });
+
+    fetch('/api/data/管理人基金数量（Top6）')
+      .then(res => res.json())
+      .then(data => {
+        const names = data.map(d => d["基金管理人"]);
+        const values = data.map(d => d["基金总数(个)"]);
+        echarts.init(document.getElementById('chart3')).setOption({
+          title: { text: 'Top6 基金管理人基金数量', left: 'center' },
+          tooltip: { trigger: 'axis' },
+          xAxis: { type: 'category', data: names, axisLabel: { rotate: 30 } },
+          yAxis: { type: 'value' },
+          series: [{ type: 'bar', data: values, itemStyle: { color: '#91cc75' } }]
+        });
+      });
+
+    fetch('/api/data/基金总数')
+      .then(res => res.json())
+      .then(data => {
+        document.getElementById('total-funds').innerText = '基金总数：' + data[0]["基金总数(个)"];
+        pageData.totalFunds = data[0]["基金总数(个)"];
+      });
+
+    fetch('/api/data/基金经理总人数')
+      .then(res => res.json())
+      .then(data => {
+        document.getElementById('total-managers').innerText = '基金经理总人数：' + data[0]["基金经理去重总数"];
+        pageData.totalManagers = data[0]["基金经理去重总数"];
+      });
+
+    fetch('/api/data/基金类型维度年回报率概览图')
+      .then(res => res.json())
+      .then(data => {
+        const types = data.map(d => d["基金类型"]);
+        const fiveYears = data.map(d => parseFloat(d["五年回报(年化) 的平均值"]));
+        const tenYears = data.map(d => parseFloat(d["十年回报(年化) 的平均值"]));
+        echarts.init(document.getElementById('chart4')).setOption({
+          title: { text: '基金类型维度年回报率概览', left: 'center' },
+          tooltip: { trigger: 'axis' },
+          legend: { top: 30 },
+          xAxis: { type: 'category', data: types, axisLabel: { rotate: 30 } },
+          yAxis: { type: 'value' },
+          series: [
+            { name: '五年回报(年化)', type: 'bar', data: fiveYears, itemStyle: { color: '#73C0DE' } },
+            { name: '十年回报(年化)', type: 'bar', data: tenYears, itemStyle: { color: '#FC8452' } }
+          ]
+        });
+      });
+
+    // ✅ 图表5：不同基金类型的总资产规模
+    fetch('/api/data/总资产规模')
+      .then(res => res.json())
+      .then(data => {
+        const types = data.map(d => d["基金类型"]);
+        const assets = data.map(d => parseFloat(d["总资产规模（亿元）"]));
+        pageData.fundTypeAssets = data;
+        echarts.init(document.getElementById('chart5')).setOption({
+          title: { text: '不同基金类型的总资产规模', left: 'center' },
+          tooltip: { trigger: 'axis' },
+          xAxis: { type: 'category', data: types, axisLabel: { rotate: 30 } },
+          yAxis: { type: 'value', name: '总资产规模（亿元）' },
+          series: [{ type: 'bar', data: assets, itemStyle: { color: '#fac858' } }]
+        });
+      });
+
+    // ✅ 图表6：基金类型夏普比率趋势对比图，并将数据存入 pageData.sharpeRatios
+    fetch('/api/data/基金类型夏普比率趋势对比图')
+      .then(res => res.json())
+      .then(data => {
+        pageData.sharpeRatios = data; // ✅ 这里存数据给 AI 用
+
+        const types = data.map(d => d["基金类型"]);
+        const sharp5 = data.map(d => parseFloat(d["夏普比率(五年) 的平均值"]));
+        const sharp10 = data.map(d => parseFloat(d["夏普比率(十年) 的平均值"]));
+
+        echarts.init(document.getElementById('chart6')).setOption({
+          title: { text: '基金类型夏普比率趋势对比图', left: 'center' },
+          tooltip: { trigger: 'axis' },
+          legend: { top: 30 },
+          xAxis: {
+            type: 'category',
+            data: types,
+            axisLabel: { rotate: 30 }
+          },
+          yAxis: {
+            type: 'value',
+            name: '夏普比率'
+          },
+          series: [
+            {
+              name: '五年夏普比率',
+              type: 'bar',
+              stack: 'total',
+              data: sharp5,
+              itemStyle: { color: '#91cc75' }
+            },
+            {
+              name: '十年夏普比率',
+              type: 'bar',
+              stack: 'total',
+              data: sharp10,
+              itemStyle: { color: '#fac858' }
+            }
+          ]
+        });
+      })
+      .catch(() => {
+        document.getElementById('chart6').innerHTML = '<div style="text-align:center;padding:20px">图表加载失败</div>';
+      });
+
+    const aiMessages = document.getElementById('ai-messages');
+    const aiInput = document.getElementById('ai-input');
+    const aiSend = document.getElementById('ai-send');
+    let messageHistory = [];
+
+    async function sendAiRequest(prompt) {
+      addMessage(prompt, 'user');
+      const loadingMsg = addMessage('正在分析数据...', 'loading');
+
+      try {
+        let context = "请基于当前页面的基金数据回答问题。\n";
+        context += `当前页面数据：基金总数 ${pageData.totalFunds}，总资产规模 ${pageData.totalAssets} 亿元，基金管理人总数 ${pageData.managerCount}，基金经理总人数 ${pageData.totalManagers}。\n`;
+
+        if (pageData.fundTypeAssets.length > 0) {
+          context += "不同基金类型的总资产规模如下：\n";
+          pageData.fundTypeAssets.forEach(item => {
+            context += `${item["基金类型"]}：${item["总资产规模（亿元）"]}亿元；`;
+          });
+          context += "\n";
+        }
+
+        // ✅ 新增夏普比率描述，让AI能知道夏普比率数据
+        if (pageData.sharpeRatios && pageData.sharpeRatios.length > 0) {
+          context += "各基金类型夏普比率如下：\n";
+          pageData.sharpeRatios.forEach(d => {
+            context += `${d["基金类型"]}：五年 ${d["夏普比率(五年) 的平均值"]}，十年 ${d["夏普比率(十年) 的平均值"]}。\n`;
+          });
+        }
+
+        const fullPrompt = context + "用户问题：" + prompt;
+        messageHistory.push({ role: 'user', content: fullPrompt });
+
+        const response = await axios.post(DEEPSEEK_API_URL, {
+          model: 'deepseek-chat',
+          messages: messageHistory,
+          max_tokens: 1000,
+          temperature: 0.7
+        }, {
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${DEEPSEEK_API_KEY}`
+          }
+        });
+
+        let aiResponse = response.data.choices[0].message.content;
+        aiResponse = aiResponse.replace(/[*_`#<>|]/g, '').replace(/\n+/g, ' ');
+        messageHistory.push({ role: 'assistant', content: aiResponse });
+        addMessage(aiResponse, 'ai');
+
+      } catch (error) {
+        addMessage('抱歉，AI请求失败，请稍后再试', 'ai');
+      } finally {
+        aiMessages.removeChild(loadingMsg);
+      }
+    }
+
+    function addMessage(text, type) {
+      const msg = document.createElement('div');
+      msg.className = `ai-message ${type}`;
+      msg.textContent = text;
+      aiMessages.appendChild(msg);
+      aiMessages.scrollTop = aiMessages.scrollHeight;
+      return msg;
+    }
+
+    aiSend.addEventListener('click', () => {
+      const prompt = aiInput.value.trim();
+      if (prompt) {
+        sendAiRequest(prompt);
+        aiInput.value = '';
+      }
+    });
+
+    aiInput.addEventListener('keypress', e => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        aiSend.click();
+      }
+    });
+  </script>
+</body>
+</html>
