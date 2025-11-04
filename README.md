@@ -362,8 +362,7 @@ A: 使用 `get_special_fund.py` 模块，修改其中的基金代码列表。
 
 **Your Name**
 
-- GitHub: [@yourusername](https://github.com/yourusername)
-- Email: your.email@example.com
+- GitHub: [@Umberk](https://github.com/Umberk)
 
 ## 🙏 致谢
 
