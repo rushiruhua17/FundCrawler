@@ -23,7 +23,7 @@ class DataMining(DataMiningModule):
                 except Exception as e:
                     logging.error(f'基金{context.fund_code}类型{page_type}分析失败')
                     requests_response = response.response
-                    logging.error(f'{requests_response.text if requests_response else 'res is None'}', e)
+                    logging.error(f"{requests_response.text if requests_response else 'res is None'}", e)
             else:
                 try:
                     url = DataCleaningStrategyFactory.get_strategy(page_type).build_url(context)
