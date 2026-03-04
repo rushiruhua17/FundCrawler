@@ -1,7 +1,13 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, send_from_directory
 import pandas as pd
+import os
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='static')
+
+
+@app.route('/')
+def index():
+    return send_from_directory('static', 'index.html')
 
 
 @app.route('/api/data/<name>')
@@ -17,4 +23,5 @@ def get_data(name):
 
 
 if __name__ == '__main__':
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
     app.run(debug=True)
